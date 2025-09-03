@@ -1,0 +1,57 @@
+# Simple Bank Customer Churn Prediction Configuration
+# ==================================================
+
+# Random seed for reproducibility
+random_state: 42
+
+# Data configuration
+data:
+  path: "data/raw/Churn_Modelling.csv"  # Path to your data file
+  target_column: "Exited"                # Target column name
+  test_size: 0.2                         # Test set size (0.1 = 10%, 0.2 = 20%)
+
+# Preprocessing options
+preprocessing:
+  handle_missing: true                   # Handle missing values automatically
+  use_custom_modules: true               # Use custom modules from src/
+  feature_engineering_type: 'advanced'  # 'basic', 'advanced', 'selected'
+  encode_categorical: "onehot"           # "onehot" or "label" encoding for categorical features
+  scale_features: "minmax"             # "standard", "minmax", or "none"
+  apply_pca: false                       # Apply PCA dimensionality reduction
+  pca_variance: 0.95                     # Keep 95% of variance if PCA is applied
+
+# Imbalance handling methods to try
+imbalance_methods:
+  - "nearmiss"    # NearMiss undersampling
+  - "smote"         # SMOTE oversampling
+  - "smoteenn"   # SMOTEENN
+  - "smotetomek"  # SMOTETomek
+
+# Models to train
+models:
+  xgboost:
+    enabled: true
+    params:
+      n_estimators: 100
+      max_depth: 6
+      learning_rate: 0.1
+      random_state: 42
+      eval_metric: "logloss"
+      
+  lightgbm:
+    enabled: true
+    params:
+      n_estimators: 100
+      max_depth: 6
+      learning_rate: 0.1
+      random_state: 42
+      verbosity: -1
+      
+  catboost:
+    enabled: true
+    params:
+      iterations: 100
+      depth: 6
+      learning_rate: 0.1
+      random_state: 42
+      verbose: false
