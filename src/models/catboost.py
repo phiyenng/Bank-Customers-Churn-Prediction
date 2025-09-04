@@ -1,16 +1,8 @@
-from sklearn.pipeline import make_pipeline
+# modules/models/catboost.py
 from catboost import CatBoostClassifier
-from modules.feature_engineering import FeatureEngineeringPipeline
-from models.utils import cross_val_score
+from .base_model import BaseModel
 
-seed = 42
-
-def get_cb_pipeline():
-    return make_pipeline(
-        FeatureEngineeringPipeline(),
-        CatBoostClassifier(
-            random_state=seed,
-            verbose=0,
-            n_estimators=1000
-        )
-    )
+class CatBoostModel(BaseModel):
+    """Wrapper for the CatBoost Classifier."""
+    def _create_model(self):
+        return CatBoostClassifier(**self.params)

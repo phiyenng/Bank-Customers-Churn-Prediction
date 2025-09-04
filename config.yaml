@@ -1,57 +1,91 @@
-# Simple Bank Customer Churn Prediction Configuration
-# ==================================================
+# ===================================================================
+# CONFIGURATION FOR THE PIPELINE
+# ===================================================================
 
-# Random seed for reproducibility
-random_state: 42
+# 1. Project and Data Paths
+project:
+  name: 'Bank_Churn_Prediction'
+  version: '1.0.0'
+  log_level: 'INFO' # Options: DEBUG, INFO, WARNING, ERROR
 
-# Data configuration
-data:
-  path: "data/raw/Churn_Modelling.csv"  # Path to your data file
-  target_column: "Exited"                # Target column name
-  test_size: 0.2                         # Test set size (0.1 = 10%, 0.2 = 20%)
+paths:
+  raw_data_dir: 'data/raw/'
+  original_dataset: 'Churn_Modelling.csv'
+  competition_train: 'train.csv'
+  saved_model_dir: 'saved_models/'
 
-# Preprocessing options
-preprocessing:
-  handle_missing: true                   # Handle missing values automatically
-  use_custom_modules: true               # Use custom modules from src/
-  feature_engineering_type: 'advanced'  # 'basic', 'advanced', 'selected'
-  encode_categorical: "onehot"           # "onehot" or "label" encoding for categorical features
-  scale_features: "minmax"             # "standard", "minmax", or "none"
-  apply_pca: false                       # Apply PCA dimensionality reduction
-  pca_variance: 0.95                     # Keep 95% of variance if PCA is applied
+# 2. Data Processing and Splitting
+data_processing:
+  target_column: 'Exited'
+  test_split_size: 0.2
+  random_state: 42
 
-# Imbalance handling methods to try
-imbalance_methods:
-  - "nearmiss"    # NearMiss undersampling
-  - "smote"         # SMOTE oversampling
-  - "smoteenn"   # SMOTEENN
-  - "smotetomek"  # SMOTETomek
+# 3. Feature Engineering Pipeline
+feature_engineering:
+  use_num: true
+  num_transform_method: 'yeo-johnson'  # Options: "yeo-johnson", "boxcox", "log", "sqrt", "none"
 
-# Models to train
+  use_cat: true
+  cat_encoding_method: 'target'      # Options: "onehot", "label", "target"
+
+  use_cluster: true
+  n_clusters: 4
+
+  use_arithmetic: true
+
+  use_feature_selection: false # Set to true to enable
+  k_best_features: 10
+
+  use_reduction: false         # Set to true to enable
+  reduction_method: 'pca'      # Options: "pca", "svd"
+  n_components: 5
+
+# 4. Imbalance Handling
+imbalance_handling:
+  methods:
+    - 'none'     # Best performing method based on results
+    - 'smote'
+    - 'smoteenn'
+    - 'nearmiss'
+  random_state: 42
+
+# 5. Model Training and Hyperparameters - Optimized
 models:
   xgboost:
-    enabled: true
+    train: true
     params:
-      n_estimators: 100
-      max_depth: 6
-      learning_rate: 0.1
+      eta: 0.04
+      max_depth: 5
+      subsample: 0.89
+      colsample_bytree: 0.42
+      min_child_weight: 0.42
+      reg_lambda: 1.76
+      reg_alpha: 1.99
+      n_estimators: 1200           # Increased for better performance
       random_state: 42
-      eval_metric: "logloss"
-      
+      tree_method: 'hist'
+
   lightgbm:
-    enabled: true
+    train: true
     params:
-      n_estimators: 100
-      max_depth: 6
-      learning_rate: 0.1
+      learning_rate: 0.0186
+      max_depth: 9
+      subsample: 0.6876
+      min_child_weight: 0.8117
+      reg_lambda: 6.48
+      reg_alpha: 3.30
+      n_estimators: 1200           # Increased for better performance
       random_state: 42
-      verbosity: -1
-      
+
   catboost:
-    enabled: true
+    train: true
     params:
-      iterations: 100
-      depth: 6
-      learning_rate: 0.1
+      learning_rate: 0.03          # Optimized for better performance
+      depth: 6                     # Optimized depth
+      l2_leaf_reg: 3.0            # Optimized regularization
+      bagging_temperature: 0.2     # Optimized bagging
+      random_strength: 0.2         # Optimized randomness
+      border_count: 128           # Optimized splits
+      n_estimators: 1200          # Increased for better performance
       random_state: 42
-      verbose: false
+      verbose: 0
