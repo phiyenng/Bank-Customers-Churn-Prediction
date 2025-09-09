@@ -2,9 +2,6 @@
 Imbalance Handling Module
 =========================
 
-This module provides tools to handle imbalanced datasets
-using resampling techniques such as SMOTE, NearMiss,
-SMOTEENN, and SMOTETomek.
 """
 
 import pandas as pd

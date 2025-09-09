@@ -13,8 +13,6 @@ from typing import Tuple, List, Optional
 import warnings
 warnings.filterwarnings('ignore')
 
-from sklearn.model_selection import train_test_split
-
 # ==== CONFIGURATION ====
 DATA_PATH = Path('data/raw')
 PROCESSED_PATH = Path('data/processed')
@@ -68,7 +66,7 @@ class DataLoader:
             return None
             
         # Remove unnecessary columns from original dataset
-        self.original_df = self.original_df.drop(['RowNumber'], axis=1, errors='ignore')
+        self.original_df = self.original_df.drop(['RowNumber','CustomerId','Surname','Geography'], axis=1, errors='ignore')
 
         # Ensure columns are in the same order
         common_cols = list(set(self.original_df.columns) & set(self.competition_train_df.columns))
@@ -84,24 +82,3 @@ class DataLoader:
         ], ignore_index=True)
         
         return self.combined_train_df
-
-class DataSplitter:
-    """
-    Handle splitting dataset into train/validation sets.
-    """
-
-    def __init__(self, test_size: float = 0.2, random_state: int = 42):
-        self.test_size = test_size
-        self.random_state = random_state
-
-    def split(self, df, target_col: str):
-        X = df.drop(columns=[target_col])
-        y = df[target_col]
-
-        X_train, X_val, y_train, y_val = train_test_split(
-            X, y,
-            test_size=self.test_size,
-            stratify=y,
-            random_state=self.random_state
-        )
-        return X_train, X_val, y_train, y_val
