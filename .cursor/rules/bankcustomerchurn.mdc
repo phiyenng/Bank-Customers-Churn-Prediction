@@ -1,0 +1,80 @@
+---
+description: Rules for the Bank Customer Churn Data Science project
+globs:
+  - "**/*.py"
+  - "**/*.ipynb"
+alwaysApply: true
+---
+
+# Project Rules – Bank Customer Churn
+
+## 1. General Principles
+- Code must be **readable, modular, and reproducible**.
+- Use **type hints** and **docstrings** for all functions and classes.
+- No manual tweaks inside notebooks — reusable logic must live in `src/`.
+
+---
+
+## 2. Project Structure
+project-root/
+├── data/
+│   ├── train.csv
+│   ├── Churn_Modelling.csv
+│   └── test.csv
+├── notebooks/  # optional, for exploratory analysis
+├── src/
+│   ├── models/
+│   │   ├── xgboost.py
+│   │   ├── lightgbm.py
+│   │   └── catboost.py
+│   └── modules/
+│       ├── processing.py  # DataLoader, OutlierHandler, Transformation, ImbalanceHandler
+│       └── feature_engineering.py  # optional, currently skipped
+├── configs.yml  # model params, random seeds, sampling methods
+└── main.py  # pipeline entry point
+
+
+---
+
+## 4. Feature Engineering
+- All feature logic in `src/feature_engineering/`.  
+- Each feature must be justified.  
+- Remove redundant or highly correlated features.  
+- Save feature importance plots for interpretability.  
+
+---
+
+## 5. Modeling
+- Training code in `src/models/`.  
+- Models initialized via **config files** (YAML/JSON).  
+- Use wrapper classes for unified interface.  
+- Benchmark against a **baseline model**.  
+- Save trained models with versioning.  
+
+---
+
+## 6. Evaluation
+- Report **multiple metrics**: Accuracy, Precision, Recall, F1, AUC-ROC.  
+- Use **stratified cross-validation**.  
+- Compare models using consistent metrics.  
+- Visualizations: confusion matrix, ROC, PR curve, feature importance.  
+
+---
+
+## 8. Reproducibility & Deployment
+- Environments defined in `requirements.txt` or `environment.yaml`.  
+- Save preprocessing pipelines + models (`joblib`, `pickle`).  
+- Provide `predict.py` for inference.  
+- Version control for data and models.  
+
+---
+
+## 9. Collaboration
+- Use meaningful commit messages.  
+- Branch convention:  
+  - `feature/...`  
+  - `bugfix/...`  
+  - `experiment/...`  
+- Pull requests reviewed before merging to `main`.  
+
+---

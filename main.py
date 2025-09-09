@@ -1,162 +1,191 @@
-# main.py
-import yaml
-import pandas as pd
 import logging
 from pathlib import Path
+from typing import Any, Dict
 
-# Custom module imports
-from src.modules.data_processing import DataLoader, DataSplitter
-from src.modules.feature_engineering import FeatureEngineeringPipeline
-from src.modules.imbalance_handler import ImbalanceHandler
-from src.models.evaluation import get_evaluation_metrics, print_classification_report
+import numpy as np
+import pandas as pd
+import yaml
+
+from sklearn.model_selection import train_test_split, StratifiedKFold
+from sklearn.metrics import precision_recall_curve, classification_report, roc_auc_score, average_precision_score, accuracy_score
+
+from src.modules.processing import DataLoader, OutlierHandler, Transformation, ImbalanceHandler
 from src.models.xgboost import XGBoostModel
 from src.models.lightgbm import LightGBMModel
 from src.models.catboost import CatBoostModel
 
-# Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def load_config(config_path='config.yaml'):
-    """Loads the YAML configuration file."""
-    with open(config_path, 'r') as file:
-        return yaml.safe_load(file)
 
-def get_model_instance(model_name: str, params: dict):
-    """Factory function to get a model instance."""
-    model_map = {
-        'xgboost': XGBoostModel,
-        'lightgbm': LightGBMModel,
-        'catboost': CatBoostModel
-    }
-    model_class = model_map.get(model_name)
-    if not model_class:
-        raise ValueError(f"Model '{model_name}' is not supported.")
-    return model_class(params=params)
+def load_config(path: str = 'config.yaml') -> Dict[str, Any]:
+    with open(path, 'r', encoding='utf-8') as f:
+        return yaml.safe_load(f) or {}
 
-def run_pipeline():
-    """Main function to execute the full training and evaluation pipeline."""
-    
-    # 1. Load Configuration
-    config = load_config()
-    cfg_dp = config['data_processing']
-    cfg_fe = config['feature_engineering']
-    cfg_imb = config['imbalance_handling']
-    logging.info("Configuration loaded successfully.")
 
-    # 2. Load and Combine Datasets
-    data_loader = DataLoader()
-    full_train_df = data_loader.combine_datasets()
-    logging.info(f"Data loaded and combined. Shape: {full_train_df.shape}")
+def threshold_from_pr(y_true: np.ndarray, proba: np.ndarray) -> float:
+    precision, recall, thresholds = precision_recall_curve(y_true, proba)
+    f1 = 2 * (precision * recall) / np.clip(precision + recall, a_min=1e-12, a_max=None)
+    return float(thresholds[np.nanargmax(f1)]) if thresholds.size > 0 else 0.5
 
-    # 3. Split Data into Training and Test Sets (Crucial First Step)
-    data_splitter = DataSplitter(
-        test_size=cfg_dp['test_split_size'],
-        random_state=cfg_dp['random_state']
+
+def run_pipeline() -> None:
+    cfg = load_config()
+    paths = cfg['paths']
+    pp = cfg['preprocessing']
+    split_cfg = cfg['split']
+    imb = cfg['imbalance']
+    models_cfg = cfg['models']
+
+    target = pp.get('target_column', 'Exited')
+
+    # Step 0: Load & Combine Data
+    dl = DataLoader()
+    combined_df = dl.combine_datasets()
+    if combined_df is None or combined_df.empty:
+        raise RuntimeError('No combined data. Please verify DataLoader.combine_datasets().')
+
+    if dl.competition_test_df is None:
+        _, _ = dl.load_competition_datasets()
+    test_df = dl.competition_test_df
+    if test_df is None or test_df.empty:
+        raise RuntimeError('No test data found from DataLoader.load_competition_datasets().')
+
+    X_combine = combined_df.drop(columns=[target])
+    y_combine = combined_df[target]
+
+    if target in test_df.columns:
+        X_test = test_df.drop(columns=[target])
+        y_test = test_df[target]
+    else:
+        X_test = test_df.copy()
+        y_test = pd.Series([None] * len(test_df), name=target)
+
+    # Outlier handling
+    oh = OutlierHandler(iqr_multiplier=pp.get('iqr_multiplier', 1.5), target_col=target)
+    combined = pd.concat([X_combine, y_combine], axis=1)
+    combined = oh.remove_outliers(combined, strategy=pp.get('strategy', 'any'), max_iter=pp.get('max_iter', 10), verbose=pp.get('verbose', True))
+    X_combine = combined.drop(columns=[target])
+    y_combine = combined[target]
+
+    # Step 1: Stratified Split Train/Validation
+    X_train_raw, X_val_raw, y_train, y_val = train_test_split(
+        X_combine, y_combine, test_size=split_cfg['test_size'], stratify=y_combine, random_state=split_cfg['random_state']
     )
-    X_train, X_test, y_train, y_test = data_splitter.split(full_train_df, target_col=cfg_dp['target_column'])
-    logging.info(f"Data split. Train shape: {X_train.shape}, Test shape: {X_test.shape}")
 
-    # 4. Initialize and Fit the Feature Engineering Pipeline on Training Data
-    feature_pipeline = FeatureEngineeringPipeline(
-        use_num=cfg_fe['use_num'],
-        num_method=cfg_fe['num_transform_method'],
-        use_cat=cfg_fe['use_cat'],
-        cat_method=cfg_fe['cat_encoding_method'],
-        use_cluster=cfg_fe['use_cluster'],
-        n_clusters=cfg_fe['n_clusters'],
-        use_arithmetic=cfg_fe['use_arithmetic'],
-        use_reduction=cfg_fe['use_reduction'],
-        reduction_method=cfg_fe['reduction_method'],
-        n_components=cfg_fe['n_components']
-    )
-    logging.info("Fitting feature engineering pipeline on training data...")
-    feature_pipeline.fit(X_train, y_train)
-    
-    # Transform the training data
-    X_train_processed = feature_pipeline.transform(X_train)
-    logging.info(f"Training data transformed. New shape: {X_train_processed.shape}")
+    # Scale/Transform
+    tr = Transformation(handle_categorical=True)
+    tr.fit(X_train_raw)
+    X_train = tr.transform(X_train_raw)
+    X_val = tr.transform(X_val_raw)
+    X_test_scaled = tr.transform(X_test)
 
-    # 5. Transform the Test Data using the Fitted Pipeline (do this once)
-    logging.info("Transforming test data with the fitted pipeline...")
-    X_test_final = feature_pipeline.transform(X_test)
+    # Step 2 & 3: Loop through multiple resampling methods & train models
+    resampling_methods = ['smote', 'adasyn', 'smote_tomek', 'smote_enn']
+    trained = {}  # store models per resampling method
+    validation_reports = []  # store metrics
 
-    # 6. Train Models with Different Imbalance Handling Methods
-    all_results = []
-    saved_model_dir = Path(config['paths']['saved_model_dir'])
-    saved_model_dir.mkdir(exist_ok=True) # Create directory if it doesn't exist
-
-    # Loop through each imbalance handling method
-    for imbalance_method in cfg_imb['methods']:
-        logging.info(f"\n{'='*50}")
-        logging.info(f"IMBALANCE HANDLING METHOD: {imbalance_method.upper()}")
-        logging.info(f"{'='*50}")
+    for method in resampling_methods:
+        print(f"\n=== Resampling method: {method} ===")
         
-        # Apply imbalance handling
-        if imbalance_method.lower() != 'none':
-            imbalancer = ImbalanceHandler(method=imbalance_method, random_state=cfg_imb['random_state'])
-            logging.info(f"Applying '{imbalance_method}' to handle class imbalance...")
-            X_train_final, y_train_final = imbalancer.fit_resample(X_train_processed, y_train)
-            logging.info(f"Original training shape: {X_train_processed.shape}")
-            logging.info(f"Resampled training shape: {X_train_final.shape}")
-            
-            # Check class distribution
-            class_counts = pd.Series(y_train_final).value_counts().sort_index()
-            logging.info(f"Class distribution after {imbalance_method}: {dict(class_counts)}")
-        else:
-            X_train_final, y_train_final = X_train_processed, y_train
-            logging.info("No imbalance handling applied.")
-            class_counts = pd.Series(y_train_final).value_counts().sort_index()
-            logging.info(f"Original class distribution: {dict(class_counts)}")
-
-        # Train each model with current imbalance method
-        for model_name, model_config in config['models'].items():
-            if not model_config.get('train', False):
+        # Initialize imbalance handler
+        ih = ImbalanceHandler(method=method, random_state=split_cfg['random_state'])
+        
+        # Fit and resample (train set only)
+        X_train_res, y_train_res = ih.fit_resample(X_train, y_train, sampling_strategy=imb.get('sampling_strategy', 'auto'))
+        
+        for name, spec in models_cfg.items():
+            if not spec.get('train', False):
                 continue
+            
+            # Initialize model
+            if name == 'xgboost':
+                model = XGBoostModel(params=spec.get('params', {}))
+            elif name == 'lightgbm':
+                model = LightGBMModel(params=spec.get('params', {}))
+            elif name == 'catboost':
+                model = CatBoostModel(params=spec.get('params', {}))
+            else:
+                continue
+            
+            # Train model
+            model.fit(X_train_res.values, y_train_res.values, eval_set=(X_val.values, y_val.values))
+            
+            # Predict on validation
+            proba_val = model.predict_proba(X_val.values)[:, 1]
+            thr = threshold_from_pr(y_val.values, proba_val)
+            y_pred_val = (proba_val >= thr).astype(int)
+            
+            # Save metrics
+            report_row = {
+                'Resampling': method,
+                'Model': name,
+                'Threshold': thr,
+                'Accuracy': (y_val == y_pred_val).mean(),
+                'F1': classification_report(y_val, y_pred_val, output_dict=True)['weighted avg']['f1-score'],
+                'Precision': classification_report(y_val, y_pred_val, output_dict=True)['weighted avg']['precision'],
+                'Recall': classification_report(y_val, y_pred_val, output_dict=True)['weighted avg']['recall'],
+                'ROC_AUC': roc_auc_score(y_val, proba_val),
+                'PR_AUC': average_precision_score(y_val, proba_val)
+            }
+            validation_reports.append(report_row)
+            
+            # Save trained model
+            trained[f"{method}_{name}"] = model
 
-            logging.info(f"\n{'-'*20} Training {model_name.upper()} with {imbalance_method.upper()} {'-'*20}")
-            
-            # Instantiate and train model
-            model = get_model_instance(model_name, model_config['params'])
-            
-            # Convert DataFrame to numpy array for model training
-            X_train_array = X_train_final.values if hasattr(X_train_final, 'values') else X_train_final
-            y_train_array = y_train_final.values if hasattr(y_train_final, 'values') else y_train_final
-            
-            model.fit(X_train_array, y_train_array)
-            
-            # Make predictions on the transformed test set
-            X_test_array = X_test_final.values if hasattr(X_test_final, 'values') else X_test_final
-            y_pred = model.predict(X_test_array)
-            y_pred_proba = model.predict_proba(X_test_array)[:, 1]
-            
-            # Evaluate
-            model_identifier = f"{model_name}_{imbalance_method}"
-            metrics = get_evaluation_metrics(y_test, y_pred, y_pred_proba, model_identifier)
-            all_results.append(metrics)
-            
-            logging.info(f"Evaluation Report for {model_name.upper()} with {imbalance_method.upper()}:")
-            print_classification_report(y_test, y_pred)
+    # Convert to DataFrame for easy comparison
+    val_report_df = pd.DataFrame(validation_reports)
+    print("\nValidation Report (all resampling methods & models):\n", val_report_df)
 
-            # Save model with imbalance method in name
-            model_save_path = saved_model_dir / f"{model_name}_{imbalance_method}_model.joblib"
-            model.save(model_save_path)
-            logging.info(f"{model_name.upper()}_{imbalance_method.upper()} model saved to {model_save_path}")
 
-    # 7. Display Final Comparative Results
-    results_df = pd.DataFrame(all_results).set_index('Model')
-    logging.info(f"\n{'='*25} FINAL COMPARATIVE ANALYSIS SUMMARY {'='*25}")
-    print(results_df)
-    
-    # Display results grouped by model for easier comparison
-    logging.info(f"\n{'='*25} RESULTS BY MODEL {'='*25}")
-    for model_name in config['models'].keys():
-        if config['models'][model_name].get('train', False):
-            model_results = results_df[results_df.index.str.startswith(model_name)]
-            if not model_results.empty:
-                logging.info(f"\n{model_name.upper()} Results:")
-                print(model_results)
-    
-    logging.info("Pipeline execution finished successfully! 🎉")
+    # Step 4-5: Threshold tuning & Validation evaluation
+    report_rows = []
+    thresholds = {}
+    for name, model in trained.items():
+        proba_val = model.predict_proba(X_val.values)[:, 1]
+        thr = threshold_from_pr(y_val.values, proba_val)
+        thresholds[name] = thr
+        y_pred_val = (proba_val >= thr).astype(int)
 
-if __name__ == "__main__":
+        report = classification_report(y_val, y_pred_val, output_dict=True)
+        row = {
+            'Model': name,
+            'Accuracy': accuracy_score(y_val, y_pred_val),
+            'F1': report['weighted avg']['f1-score'],
+            'Precision': report['weighted avg']['precision'],
+            'Recall': report['weighted avg']['recall'],
+            'ROC_AUC': roc_auc_score(y_val, proba_val),
+            'PR_AUC': average_precision_score(y_val, proba_val),
+            'Threshold': thr
+        }
+        report_rows.append(row)
+
+    val_report = pd.DataFrame(report_rows).set_index('Model')
+    print("Validation Summary:\n", val_report)
+
+    # Step 6: Evaluate best on Test
+    best_name = val_report['F1'].idxmax()
+    best_model = trained[best_name]
+    best_thr = thresholds[best_name]
+
+    proba_test = best_model.predict_proba(X_test_scaled.values)[:, 1]
+    y_pred_test = (proba_test >= best_thr).astype(int)
+    print(f"\nBest Model: {best_name} @ threshold={best_thr:.3f}")
+
+    if y_test is not None and y_test.notnull().all() and set(pd.Series(y_test).unique()) <= {0, 1}:
+        print(classification_report(y_test, y_pred_test))
+        print("Accuracy:", accuracy_score(y_test, y_pred_test))
+        print("ROC-AUC:", roc_auc_score(y_test, proba_test))
+        print("PR-AUC:", average_precision_score(y_test, proba_test))
+    else:
+        out_path = Path(cfg['paths'].get('artifacts_dir', 'saved_models')) / 'test_predictions.csv'
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame({'proba': proba_test}).to_csv(out_path, index=False)
+        print(f"Saved test probabilities to {out_path}")
+
+
+def main() -> None:
     run_pipeline()
+
+
+if __name__ == '__main__':
+    main()
