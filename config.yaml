@@ -8,6 +8,19 @@ preprocessing:
   save_combined: data/processed/combined_data.csv
   save_clean: data/processed/combined_data_clean.csv
 
+feature_engineering:
+  enable: true
+  apply_all_features: true
+  custom_features: []
+
+feature_selection:
+  enable: true
+  method: 'mutual_info'
+  k: 20
+
+feature_reduction:
+  enable: false
+
 paths:
   combine_sources:
     - data/raw/train.csv
