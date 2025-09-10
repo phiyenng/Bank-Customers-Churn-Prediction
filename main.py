@@ -6,6 +6,8 @@ Simple and clean pipeline using the updated modules.
 """
 
 import logging
+import random
+import gc
 import pandas as pd
 import numpy as np
 import yaml
@@ -39,6 +41,31 @@ def load_config():
     """Load configuration from YAML file."""
     with open('config.yaml', 'r') as f:
         return yaml.safe_load(f)
+
+def set_global_seed(seed: int) -> None:
+    """Set seeds for all relevant libraries to ensure reproducibility per run."""
+    random.seed(seed)
+    np.random.seed(seed)
+    try:
+        import torch  # type: ignore
+        if hasattr(torch, 'manual_seed'):
+            torch.manual_seed(seed)
+            if hasattr(torch, 'cuda') and hasattr(torch.cuda, 'manual_seed_all'):
+                torch.cuda.manual_seed_all(seed)
+    except Exception:
+        # Torch is optional; ignore if not installed
+        pass
+
+def create_model(model_name: str, model_config: dict):
+    """Factory to create a fresh, unfitted model instance from config every time."""
+    params = model_config.get('params', {})
+    if model_name == 'xgboost':
+        return XGBoostModel(params=params)
+    if model_name == 'lightgbm':
+        return LightGBMModel(params=params)
+    if model_name == 'catboost':
+        return CatBoostModel(params=params)
+    raise ValueError(f"Unknown model '{model_name}' in configuration")
 
 def get_best_threshold(y_true, y_proba):
     """Find best threshold using precision-recall curve."""
@@ -145,6 +172,9 @@ def main():
     models_config = config['models']
     
     target_column = preprocessing['target_column']
+
+    # Ensure reproducibility per run
+    set_global_seed(split_config.get('random_state', 42))
     
     # Step 1: Load and combine data
     print("\n1. Loading and combining data...")
@@ -229,15 +259,8 @@ def main():
                 
             print(f"Training {model_name}...")
             
-            # Initialize model
-            if model_name == 'xgboost':
-                model = XGBoostModel(params=model_config['params'])
-            elif model_name == 'lightgbm':
-                model = LightGBMModel(params=model_config['params'])
-            elif model_name == 'catboost':
-                model = CatBoostModel(params=model_config['params'])
-            else:
-                continue
+            # Initialize a fresh model from config (no reuse of fitted instances)
+            model = create_model(model_name, model_config)
             
             # Train model
             model.fit(
@@ -368,6 +391,40 @@ def main():
         print(f"Predictions saved to: {output_path}")
     
     print("\nPipeline completed successfully!")
+
+    # --- Cleanup to guarantee clean state across runs ---
+    try:
+        del original_df
+    except Exception:
+        pass
+    try:
+        del test_df, combined_df
+    except Exception:
+        pass
+    try:
+        del X, y, X_train, X_val, y_train, y_val
+    except Exception:
+        pass
+    try:
+        del transformer, X_train_transformed, X_val_transformed
+    except Exception:
+        pass
+    try:
+        del X_test, results_df, best_model, best_result
+    except Exception:
+        pass
+    try:
+        # Explicitly drop references to trained models and results
+        trained_models.clear()
+        del trained_models
+    except Exception:
+        pass
+    try:
+        del results
+    except Exception:
+        pass
+    # Trigger garbage collection for native memory used by boosters/estimators
+    gc.collect()
 
 if __name__ == "__main__":
     main()
