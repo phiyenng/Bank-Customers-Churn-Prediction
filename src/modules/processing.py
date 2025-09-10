@@ -75,7 +75,7 @@ class DataLoader:
             return None
             
         # Remove unnecessary columns from original dataset
-        self.original_df = self.original_df.drop(['RowNumber','CustomerId','Surname','Geography'], axis=1, errors='ignore')
+        self.original_df = self.original_df.drop(['RowNumber','CustomerId','Surname'], axis=1, errors='ignore')
 
         # Ensure columns are in the same order
         common_cols = list(set(self.original_df.columns) & set(self.competition_train_df.columns))
