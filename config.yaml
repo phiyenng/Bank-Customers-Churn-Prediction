@@ -1,25 +1,65 @@
 
 preprocessing:
   target_column: Exited
-  iqr_multiplier: 1.5
-  strategy: any
-  max_iter: 10
-  verbose: true
-  save_combined: data/processed/combined_data.csv
-  save_clean: data/processed/combined_data_clean.csv
+  outlier_handling:
+    enable: true
+    iqr_multiplier: 1.5
+    strategy: 'any'   # 'any' or 'all'
+    max_iter: 10
 
 feature_engineering:
-  enable: true
-  apply_all_features: true
-  custom_features: []
+  creation: true      
+  transformation: true
 
 feature_selection:
   enable: true
-  method: 'mutual_info'
-  k: 20
+  method: 'correlation'   # 'correlation' | 'variance' | 'mutual_info' | 'f_score'
+  threshold: 0.95       
+  target_col: 'Exited'    # mặc định trùng preprocessing.target_column
+  k: 20                   # dùng cho mutual_info/f_score
+  percentile: null
 
-feature_reduction:
-  enable: false
+imbalance:
+  enable: true
+  method: 'smote'         # 'smote' | 'adasyn' | 'smote_tomek' | 'smote_enn' | 'class_weight'
+  sampling_strategy: 'auto'
+
+split:
+  test_size: 0.2
+  val_size: 0.2
+  random_state: 42
+
+cv:
+  n_splits: 5
+
+training:
+  enable_baselines: true
+  models: ["XGBoost", "LightGBM", "CatBoost"]
+
+tuning:
+  enable: true
+  n_iter: 20
+  scoring: 'roc_auc'
+
+  XGBoost:
+    param_distributions:
+      n_estimators: [100, 200, 300]
+      max_depth: [3, 4, 5, 6]
+      learning_rate: [0.03, 0.05, 0.1]
+      subsample: [0.7, 0.8, 1.0]
+      colsample_bytree: [0.7, 0.8, 1.0]
+  LightGBM:
+    param_distributions:
+      n_estimators: [200, 400, 600]
+      num_leaves: [31, 63, 127]
+      learning_rate: [0.03, 0.05, 0.1]
+      subsample: [0.7, 0.8, 1.0]
+      colsample_bytree: [0.7, 0.8, 1.0]
+  CatBoost:
+    param_distributions:
+      depth: [4, 6, 8]
+      learning_rate: [0.03, 0.05, 0.1]
+      iterations: [300, 500, 800]
 
 paths:
   combine_sources:
@@ -27,48 +67,3 @@ paths:
     - data/raw/Churn_Modelling.csv
   test_path: data/raw/test.csv
   artifacts_dir: saved_models
-
-split:
-  test_size: 0.2
-  random_state: 42
-
-imbalance:
-  methods: ['smote', 'adasyn', 'smote_tomek', 'smote_enn'] 
-  sampling_strategy: auto
-
-models:
-  xgboost:
-    train: true
-    params:
-      n_estimators: 500
-      learning_rate: 0.05
-      max_depth: 6
-      subsample: 0.9
-      colsample_bytree: 0.8
-      reg_lambda: 1.0
-      random_state: 42
-      n_jobs: -1
-      eval_metric: logloss
-  lightgbm:
-    train: true
-    params:
-      n_estimators: 700
-      learning_rate: 0.03
-      max_depth: -1
-      subsample: 0.9
-      colsample_bytree: 0.8
-      reg_lambda: 1.0
-      random_state: 42
-  catboost:
-    train: true
-    params:
-      iterations: 600
-      learning_rate: 0.05
-      depth: 6
-      l2_leaf_reg: 3.0
-      random_state: 42
-      verbose: 0
-
-metrics:
-  validation: ['Accuracy', 'F1', 'Precision', 'Recall', 'ROC_AUC', 'PR_AUC']
-  test: ['Accuracy', 'F1', 'Precision', 'Recall', 'ROC_AUC', 'PR_AUC']
