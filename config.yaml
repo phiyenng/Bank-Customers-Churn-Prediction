@@ -13,15 +13,15 @@ feature_engineering:
 
 feature_selection:
   enable: true
-  method: 'correlation'   # 'correlation' | 'variance' | 'mutual_info' | 'f_score'
+  method: 'mutual_info'   # 'correlation' | 'variance' | 'mutual_info' | 'f_score'
   threshold: 0.95       
-  target_col: 'Exited'    # mặc định trùng preprocessing.target_column
-  k: 20                   # dùng cho mutual_info/f_score
+  target_col: 'Exited' 
+  k: 20                 
   percentile: null
 
 imbalance:
   enable: true
-  method: 'smote'         # 'smote' | 'adasyn' | 'smote_tomek' | 'smote_enn' | 'class_weight'
+  method: 'class_weight'         # 'smote' | 'adasyn' | 'smote_tomek' | 'smote_enn' | 'class_weight'
   sampling_strategy: 'auto'
 
 split:

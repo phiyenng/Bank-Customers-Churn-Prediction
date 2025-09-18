@@ -86,8 +86,17 @@ def main():
         combined_df = transformer.fit_transform(combined_df)
         print(f"After feature transformation: {combined_df.shape}")
 
-    # Step 4: Feature Selection
-    print("\n4) Feature selection (optional)...")
+    print('\4.5) Post-Creation Cleanup...')
+    cols_to_drop = ['Gender', 'Age', 'NumOfProducts', 'Geography_Germany', 'Geography_Spain', 'Total_Products_Used']
+    existing_cols_to_drop = [col for col in cols_to_drop if col in combined_df.columns]
+    
+    if existing_cols_to_drop:
+        combined_df = combined_df.drop(columns=existing_cols_to_drop)
+        print(f"Dropped original columns: {existing_cols_to_drop}")
+        print(f"After cleanup: {combined_df.shape}")
+
+    # Step 5: Feature Selection
+    print("\n5) Feature selection (optional)...")
     if feat_select_cfg.get('enable', True):
         selector = FeatureSelection(
             method=feat_select_cfg.get('method', 'correlation'),
@@ -99,12 +108,20 @@ def main():
         combined_df = selector.fit_transform(combined_df)
         print(f"After feature selection: {combined_df.shape}")
 
-    # Step 5: Train/Validation/Test Split
+    # Save processed combined dataset before split
+    print("\nSaving combined processed dataset...")
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    processed_path = artifacts_dir / "combined_processed.csv"
+    combined_df.to_csv(processed_path, index=False)
+    print(f"Combined processed dataset saved to: {processed_path}")
+
+
+    # Step 6: Train/Validation/Test Split
     # Prepare features and target
     X = combined_df.drop(columns=[target_column])
     y = combined_df[target_column]
   
-    print("\n5) Splitting data...")
+    print("\n6) Splitting data...")
     X_temp, X_test, y_temp, y_test = train_test_split(
         X, y,
         test_size=split_cfg['test_size'],
@@ -113,8 +130,8 @@ def main():
     )
     print(f"CV base: {X_temp.shape}, Test (held-out): {X_test.shape}")
 
-    # Step 6: Cross-Validation setup (StratifiedKFold)
-    print("\n6) Setting up Stratified K-Fold CV...")
+    # Step 7: Cross-Validation setup (StratifiedKFold)
+    print("\n7) Setting up Stratified K-Fold CV...")
     skf = StratifiedKFold(n_splits=cv_cfg.get('n_splits', 5), shuffle=True, random_state=split_cfg['random_state'])
 
     artifacts_dir = Path(paths['artifacts_dir'])
@@ -155,18 +172,18 @@ def main():
 
     print(f"Processed data saved to: {artifacts_dir}")
 
-    # Step 7: Baseline CV training & comparison (simple)
+    # Step 8: Baseline CV training & comparison (simple)
     if training_cfg.get('enable_baselines', True):
-        print("\n7) Baseline CV training & evaluation...")
+        print("\n8) Baseline CV training & evaluation...")
         agg_df = run_cv_training(artifacts_dir=artifacts_dir, target_col=target_column)
         # Pick best model by ROC_AUC
         best_row = agg_df.sort_values('ROC_AUC', ascending=False).iloc[0]
         best_model_name = best_row['Model']
         print(f"Best baseline model by ROC_AUC: {best_model_name}")
 
-        # Step 8: Hyperparameter tuning (RandomizedSearchCV)
+        # Step 9: Hyperparameter tuning (RandomizedSearchCV)
         if tuning_cfg.get('enable', False):
-            print("\n8) Hyperparameter tuning with RandomizedSearchCV...")
+            print("\n9) Hyperparameter tuning with RandomizedSearchCV...")
             scoring = tuning_cfg.get('scoring', 'roc_auc')
             n_iter = tuning_cfg.get('n_iter', 20)
             param_spaces = tuning_cfg.get(best_model_name, {}).get('param_distributions', {})
@@ -194,8 +211,8 @@ def main():
             best_params = tuner.best_params_
             print(f"Best params for {best_model_name}: {best_params}")
 
-            # Step 9: Final training on full CV base and evaluation on held-out test
-            print("\n9) Final training on full CV base and evaluation on held-out test...")
+            # Step 10: Final training on full CV base and evaluation on held-out test
+            print("\n10) Final training on full CV base and evaluation on held-out test...")
             X_final, y_final = X_temp, y_temp
             if imbalance_cfg.get('enable', True):
                 imbalance_handler = ImbalanceHandler(

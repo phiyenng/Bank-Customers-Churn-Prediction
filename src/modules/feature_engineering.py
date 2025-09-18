@@ -98,7 +98,8 @@ class FeatureTransformation:
         self.categorical_cols: List[str] = []
         self.optimized_transformers = {}
         self.gender_mapping = None
-        self.geo_encoder = None
+        self.ohe_encoder = None
+        self.ohe_cols: List[str] = []
         self.fitted = False
 
     def fit(self, df: pd.DataFrame, numeric: Optional[List[str]] = None, categorical: Optional[List[str]] = None):
@@ -117,15 +118,25 @@ class FeatureTransformation:
 
         # --- Numeric transformers ---
         for col in numeric:
+            if col not in df.columns:
+                continue
+
             series = df[col]
 
-            if col == "Age":
-                pt, ss = PowerTransformer(method="yeo-johnson", standardize=False), StandardScaler()
-                pt.fit(series.values.reshape(-1, 1))
-                ss.fit(pt.transform(series.values.reshape(-1, 1)))
-                self.optimized_transformers[col] = ("power_standard", (pt, ss))
+            if col == 'Age':
+                pt, ss = PowerTransformer(method='yeo-johnson', standardize=False), StandardScaler()
+                pt.fit(series.values.reshape(-1,1))
+                ss.fit(pt.transform(series.values.reshape(-1,1)))
+                self.optimized_transformers[col] = ('power_standard', (pt,ss))
 
-            elif col == "Balance":
+            elif col == "CreditScore":
+                shift = abs(series.min()) + 1e-6 if (series <= 0).any() else 0.0
+                pt, ss = PowerTransformer(method="box-cox", standardize=False), StandardScaler()
+                pt.fit((series + shift).values.reshape(-1, 1))
+                ss.fit(pt.transform((series + shift).values.reshape(-1, 1)))
+                self.optimized_transformers[col] = ("boxcox_standard", (pt, ss, shift))
+            
+            elif col in ["Balance", "EstimatedSalary", "Balance_Salary_Ratio"]:
                 qt = QuantileTransformer(
                     n_quantiles=min(1000, len(df)),
                     output_distribution="uniform",
@@ -134,40 +145,12 @@ class FeatureTransformation:
                 qt.fit(series.values.reshape(-1, 1))
                 self.optimized_transformers[col] = ("quantile_uniform", (qt,))
 
-            elif col == "CreditScore":
-                shift = abs(series.min()) + 1e-6 if (series <= 0).any() else 0.0
-                pt, ss = PowerTransformer(method="box-cox", standardize=False), StandardScaler()
-                pt.fit((series + shift).values.reshape(-1, 1))
-                ss.fit(pt.transform((series + shift).values.reshape(-1, 1)))
-                self.optimized_transformers[col] = ("boxcox_standard", (pt, ss, shift))
-
-            elif col == "EstimatedSalary":
-                qt, ss = QuantileTransformer(
-                    n_quantiles=min(1000, len(df)),
-                    output_distribution="uniform",
-                    random_state=42,
-                ), StandardScaler()
-                qt.fit(series.values.reshape(-1, 1))
-                ss.fit(qt.transform(series.values.reshape(-1, 1)))
-                self.optimized_transformers[col] = ("quantile_standard", (qt, ss))
-
             elif col == "Tenure":
-                mm = MinMaxScaler(feature_range=(-2, 2))
-                mm.fit(series.values.reshape(-1, 1))
-                self.optimized_transformers[col] = ("minmax_custom", (mm,))
-
-            elif col == "NumOfProducts":
-                mm, ss = MinMaxScaler(), StandardScaler()
-                mm.fit(series.values.reshape(-1, 1))
-                ss.fit(mm.transform(series.values.reshape(-1, 1)))
-                self.optimized_transformers[col] = ("minmax_standard", (mm, ss))
-
-            elif col == "HasCrCard":
-                mm = MinMaxScaler(feature_range=(-1, 1))
-                mm.fit(series.values.reshape(-1, 1))
-                self.optimized_transformers[col] = ("minmax_neg1_1", (mm,))
-
-            elif col == "IsActiveMember":
+                ss = StandardScaler()
+                ss.fit(series.values.reshape(-1, 1))
+                self.optimized_transformers[col] = ("standard", (ss,))
+            
+            elif col in ["NumOfProducts", "HasCrCard", "IsActiveMember"]:
                 self.optimized_transformers[col] = ("none", ())
 
             else:
@@ -179,10 +162,13 @@ class FeatureTransformation:
                 self.gender_mapping = {"Female": 0, "Male": 1}
                 categorical.remove("Gender")
 
-            if "Geography" in categorical:
-                self.geo_encoder = OneHotEncoder(drop="first", sparse_output=False, handle_unknown="ignore")
-                self.geo_encoder.fit(df[["Geography"]])
-                categorical.remove("Geography")
+            ohe_targets = ["Geography", "Age_Category", "Credit_Score_Range", "Geo_Gender", "Tp_Gender"]
+            self.ohe_cols = [col for col in ohe_targets if col in categorical]
+            if self.ohe_cols:
+                self.ohe_encoder = OneHotEncoder(drop="first", sparse_output=False, handle_unknown="ignore")
+                self.ohe_encoder.fit(df[self.ohe_cols])
+                for col in self.ohe_cols:
+                    categorical.remove(col)
 
         self.fitted = True
         return self
@@ -194,62 +180,51 @@ class FeatureTransformation:
         if not self.fitted:
             raise ValueError("Call fit() before transform().")
 
-        df_out = pd.DataFrame(index=df.index)
+        df_out = df.copy()
 
         # --- Numeric ---
         for col in self.numeric_cols:
-            if col not in df.columns:
+            if col not in df_out.columns:
                 continue
 
             mode, objs = self.optimized_transformers[col]
 
             if mode == "power_standard":
                 pt, ss = objs
-                df_out[col] = ss.transform(pt.transform(df[[col]]))
+                df_out[col] = ss.transform(pt.transform(df_out[[col]]))
 
             elif mode == "quantile_uniform":
                 (qt,) = objs
-                df_out[col] = qt.transform(df[[col]])
+                df_out[col] = qt.transform(df_out[[col]])
 
             elif mode == "boxcox_standard":
                 pt, ss, shift = objs
-                arr = (df[col] + shift).values.reshape(-1, 1)
+                arr = (df_out[col] + shift).values.reshape(-1, 1)
                 df_out[col] = ss.transform(pt.transform(arr))
 
-            elif mode == "quantile_standard":
-                qt, ss = objs
-                df_out[col] = ss.transform(qt.transform(df[[col]]))
-
-            elif mode == "minmax_custom":
-                (mm,) = objs
-                df_out[col] = mm.transform(df[[col]])
-
-            elif mode == "minmax_standard":
-                mm, ss = objs
-                df_out[col] = ss.transform(mm.transform(df[[col]]))
-
-            elif mode == "minmax_neg1_1":
-                (mm,) = objs
-                df_out[col] = mm.transform(df[[col]])
+            elif mode == "standard":
+                (ss,) = objs
+                df_out[col] = ss.transform(df_out[[col]])
 
             elif mode == "none":
-                df_out[col] = df[col]
+                df_out[col] = df_out[col]
 
         # --- Categorical ---
         if self.handle_categorical:
-            if self.gender_mapping and "Gender" in df.columns:
-                df_out["Gender"] = df["Gender"].map(self.gender_mapping).fillna(-1).astype(int)
+            if self.gender_mapping and "Gender" in df_out.columns:
+                df_out["Gender"] = df_out["Gender"].map(self.gender_mapping).fillna(-1).astype(int)
 
-            if self.geo_encoder and "Geography" in df.columns:
-                geo_encoded = self.geo_encoder.transform(df[["Geography"]])
-                geo_cols = self.geo_encoder.get_feature_names_out(["Geography"])
-                df_out = pd.concat([df_out, pd.DataFrame(geo_encoded, columns=geo_cols, index=df.index)], axis=1)
+            if self.ohe_encoder and all(col in df_out.columns for col in self.ohe_cols):
+                ohe_encoded = self.ohe_encoder.transform(df_out[self.ohe_cols])
+                ohe_cols = self.ohe_encoder.get_feature_names_out(self.ohe_cols)
+                ohe_df = pd.DataFrame(ohe_encoded, columns=ohe_cols, index=df_out.index)
+
+                df_out = pd.concat([df_out.drop(columns=self.ohe_cols), ohe_df], axis=1)
 
         return df_out
 
     def fit_transform(self, df: pd.DataFrame, numeric: Optional[List[str]] = None, categorical: Optional[List[str]] = None) -> pd.DataFrame:
         return self.fit(df, numeric, categorical).transform(df)
-
 
 
 # =============================================================================
