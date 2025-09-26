@@ -25,6 +25,9 @@ from xgboost import XGBClassifier
 from lightgbm import LGBMClassifier
 from catboost import CatBoostClassifier
 
+import optuna
+from sklearn.model_selection import cross_val_score
+
 def load_config():
     with open('config.yaml', 'r') as f:
         return yaml.safe_load(f)
@@ -49,6 +52,8 @@ def main():
     tuning_cfg = config.get('tuning', {"enable": False})
     
     target_column = preprocessing['target_column']
+
+    artifacts_dir = Path(paths['artifacts_dir'])
     
     # Step 1: Load and combine data
     print("\n1) Loading and combining data...")
@@ -134,7 +139,7 @@ def main():
     print("\n7) Setting up Stratified K-Fold CV...")
     skf = StratifiedKFold(n_splits=cv_cfg.get('n_splits', 5), shuffle=True, random_state=split_cfg['random_state'])
 
-    artifacts_dir = Path(paths['artifacts_dir'])
+
     cv_dir = artifacts_dir / 'cv'
     cv_dir.mkdir(parents=True, exist_ok=True)
 
@@ -161,8 +166,8 @@ def main():
         fold_dir = cv_dir / f"fold_{fold_num}"
         fold_dir.mkdir(parents=True, exist_ok=True)
 
-        pd.concat([X_train_fold, y_train_fold], axis=1).to_csv(fold_dir / 'train.csv', index=False)
-        pd.concat([X_val_fold, y_val_fold], axis=1).to_csv(fold_dir / 'val.csv', index=False)
+        pd.concat([X_train_fold, y_train_fold], axis=1).to_csv(str((fold_dir / 'train.csv').resolve()), index=False)
+        pd.concat([X_val_fold, y_val_fold], axis=1).to_csv(str((fold_dir / 'val.csv').resolve()), index=False)
         print(f"  Saved fold {fold_num} to {fold_dir}")
 
     # Save processed data
@@ -181,35 +186,48 @@ def main():
         best_model_name = best_row['Model']
         print(f"Best baseline model by ROC_AUC: {best_model_name}")
 
-        # Step 9: Hyperparameter tuning (RandomizedSearchCV)
+        # Step 9: Hyperparameter tuning với Optuna
+        best_params = {}
         if tuning_cfg.get('enable', False):
-            print("\n9) Hyperparameter tuning with RandomizedSearchCV...")
+            print("\n9) Hyperparameter tuning với Optuna...")
+            
             scoring = tuning_cfg.get('scoring', 'roc_auc')
-            n_iter = tuning_cfg.get('n_iter', 20)
-            param_spaces = tuning_cfg.get(best_model_name, {}).get('param_distributions', {})
-            skf = StratifiedKFold(n_splits=cv_cfg.get('n_splits', 5), shuffle=True, random_state=split_cfg['random_state'])
-
+            n_trials = tuning_cfg.get('n_trials', 50)
+            param_space = tuning_cfg.get(best_model_name, {}).get('param_space', {})
+            
             estimator_map = {
                 'XGBoost': XGBClassifier,
                 'LightGBM': LGBMClassifier,
                 'CatBoost': CatBoostClassifier,
             }
             Estimator = estimator_map[best_model_name]
-            base_estimator = Estimator()
 
-            tuner = RandomizedSearchCV(
-                estimator=base_estimator,
-                param_distributions=param_spaces,
-                n_iter=n_iter,
-                scoring=scoring,
-                cv=skf,
-                random_state=split_cfg['random_state'],
-                n_jobs=-1,
-                verbose=1,
-            )
-            tuner.fit(X_temp, y_temp)
-            best_params = tuner.best_params_
+            def objective(trial):
+
+                params = {}
+                for name, config in param_space.items():
+                    param_type, low, high = config
+                    if param_type == 'int':
+                        params[name] = trial.suggest_int(name, low, high)
+                    elif param_type == 'float':
+                        params[name] = trial.suggest_float(name, low, high, log=True)
+                    elif param_type == 'categorical':
+                        params[name] = trial.suggest_categorical(name, high)
+                
+                model = Estimator(**params, random_state=split_cfg['random_state'])
+                
+                skf_cv = StratifiedKFold(n_splits=cv_cfg.get('n_splits', 5), shuffle=True, random_state=split_cfg['random_state'])
+                score = cross_val_score(model, X_temp, y_temp, scoring=scoring, cv=skf_cv, n_jobs=-1)
+                
+                return score.mean()
+
+            study = optuna.create_study(direction='maximize')
+            
+            study.optimize(objective, n_trials=n_trials)
+            
+            best_params = study.best_params
             print(f"Best params for {best_model_name}: {best_params}")
+            print(f"Best {scoring} score: {study.best_value}")
 
             # Step 10: Final training on full CV base and evaluation on held-out test
             print("\n10) Final training on full CV base and evaluation on held-out test...")
@@ -230,18 +248,19 @@ def main():
                 'CatBoost': CatBoostModel,
             }
             BestWrapper = wrapper_map[best_model_name]
-            final_model = BestWrapper(params=best_params)
+            
+            final_model = BestWrapper(params=best_params) 
             final_model.fit(X_final, y_final)
 
             y_pred_test = final_model.predict(X_test)
             y_proba_test = final_model.predict_proba(X_test)[:, 1]
-            test_metrics = get_evaluation_metrics(y_test, y_pred_test, y_proba_test, model_id=f"{best_model_name}_tuned")
-            pd.DataFrame([test_metrics]).to_csv(artifacts_dir / 'test_metrics.csv', index=False)
-            print("\nTest metrics:")
+            test_metrics = get_evaluation_metrics(y_test, y_pred_test, y_proba_test, model_id=f"{best_model_name}_tuned_optuna")
+            pd.DataFrame([test_metrics]).to_csv(artifacts_dir / 'test_metrics_optuna.csv', index=False)
+            print("\nTest metrics (after Optuna tuning):")
             print(pd.DataFrame([test_metrics]))
 
             # Save tuned best model
-            joblib.dump(final_model.model, artifacts_dir / 'best_model_tuned.joblib')
+            joblib.dump(final_model.model, artifacts_dir / 'best_model_tuned_optuna.joblib')
 
     print("Pipeline completed!")
 

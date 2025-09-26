@@ -7,7 +7,9 @@ import numpy as np
 
 class CatBoostModel:
     def __init__(self, params: Optional[Dict[str, Any]] = None):
-        self.params = params or {"verbose": 0}
+        # Prevent CatBoost from writing training artifacts to disk (Windows file lock issues)
+        default_params: Dict[str, Any] = {"verbose": 0, "allow_writing_files": False}
+        self.params = {**default_params, **(params or {})}
         self.model = CatBoostClassifier(**self.params)
 
     def fit(self, X, y, eval_set: Optional[Tuple[np.ndarray, np.ndarray]] = None):
