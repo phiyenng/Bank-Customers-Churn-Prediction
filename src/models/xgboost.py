@@ -10,13 +10,12 @@ class XGBoostModel:
         self.params = params or {}
         self.model = XGBClassifier(**self.params)
 
-    def fit(self, X, y, eval_set: Optional[Tuple[np.ndarray, np.ndarray]] = None):
+    def fit(self, X, y, eval_set: Optional[Tuple[np.ndarray, np.ndarray]] = None, sample_weight: Optional[np.ndarray] = None):
         if eval_set is not None:
             X_val, y_val = eval_set
-            self.model.fit(X, y, eval_set=[(X_val, y_val)], verbose=False)
+            self.model.fit(X, y, eval_set=[(X_val, y_val)], sample_weight=sample_weight, verbose=False)
         else:
-            self.model.fit(X, y)
-
+            self.model.fit(X, y, sample_weight=sample_weight)
     def predict(self, X):
         return self.model.predict(X)
 
@@ -25,3 +24,8 @@ class XGBoostModel:
 
     def save(self, path):
         joblib.dump(self.model, path)
+
+    def get_native_model(self):
+        """Return the underlying estimator for interpretability tools."""
+
+        return self.model

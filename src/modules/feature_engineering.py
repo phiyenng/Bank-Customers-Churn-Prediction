@@ -242,23 +242,136 @@ class FeatureSelection:
         self.k = k
         self.percentile = percentile
         self.selected_features: Optional[List[str]] = None
+        self.features_to_drop: Optional[List[str]] = None
+        self.fitted = False
 
-    def fit_transform(self, df: pd.DataFrame) -> pd.DataFrame:
+    def fit(self, df: pd.DataFrame) -> 'FeatureSelection':
+        """Fit feature selection on training data to determine which features to keep."""
         if self.method == "correlation":
-            return self._select_correlation(df)
+            self._fit_correlation(df)
         elif self.method == "variance":
-            return self._select_variance(df)
+            self._fit_variance(df)
         elif self.method == "mutual_info":
-            return self._select_mutual_info(df)
+            self._fit_mutual_info(df)
         elif self.method == "f_score":
-            return self._select_f_score(df)
+            self._fit_f_score(df)
         else:
             raise ValueError(
                 f"Unknown method: {self.method}. "
                 f"Choose from ['correlation','variance','mutual_info','f_score']"
             )
+        self.fitted = True
+        return self
 
-    # ---------------- Methods ---------------- #
+    def transform(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Transform data by dropping unselected features."""
+        if not self.fitted:
+            raise ValueError("Call fit() before transform().")
+        if self.features_to_drop:
+            # Only drop columns that exist in the dataframe
+            cols_to_drop = [col for col in self.features_to_drop if col in df.columns]
+            if cols_to_drop:
+                return df.drop(columns=cols_to_drop)
+        return df
+
+    def fit_transform(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Fit and transform in one step."""
+        return self.fit(df).transform(df)
+
+    # ---------------- Fit Methods ---------------- #
+
+    def _fit_correlation(self, df: pd.DataFrame) -> None:
+        """Fit correlation-based feature selection."""
+        numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+        if self.target_col in numeric_cols:
+            numeric_cols.remove(self.target_col)
+
+        if len(numeric_cols) <= 1:
+            self.features_to_drop = []
+            self.selected_features = numeric_cols
+            return
+
+        corr_matrix = df[numeric_cols].corr().abs()
+        upper_tri = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
+        to_drop = [c for c in upper_tri.columns if any(upper_tri[c] > self.threshold)]
+
+        self.features_to_drop = to_drop
+        self.selected_features = [c for c in numeric_cols if c not in to_drop]
+        print(f"[Correlation] Dropping {len(to_drop)} features: {to_drop}")
+
+    def _fit_variance(self, df: pd.DataFrame) -> None:
+        """Fit variance-based feature selection."""
+        numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+        if self.target_col in numeric_cols:
+            numeric_cols.remove(self.target_col)
+
+        if not numeric_cols:
+            self.features_to_drop = []
+            self.selected_features = []
+            return
+
+        vt = VarianceThreshold(threshold=self.threshold)
+        vt.fit(df[numeric_cols])
+
+        keep = [col for col, k in zip(numeric_cols, vt.get_support()) if k]
+        drop = [col for col in numeric_cols if col not in keep]
+
+        self.features_to_drop = drop
+        self.selected_features = keep
+        print(f"[Variance] Dropping {len(drop)} features: {drop}")
+
+    def _fit_mutual_info(self, df: pd.DataFrame) -> None:
+        """Fit mutual information-based feature selection."""
+        if self.target_col is None:
+            raise ValueError("target_col must be specified for mutual_info")
+
+        X = df.drop(columns=[self.target_col])
+        y = df[self.target_col]
+
+        # mutual info
+        if y.dtype == "object" or y.dtype.name == "category":
+            scores = mutual_info_classif(X, y, random_state=42)
+        else:
+            scores = mutual_info_regression(X, y, random_state=42)
+
+        self._fit_top(X.columns.tolist(), scores, "Mutual Info")
+
+    def _fit_f_score(self, df: pd.DataFrame) -> None:
+        """Fit F-score-based feature selection."""
+        if self.target_col is None:
+            raise ValueError("target_col must be specified for f_score")
+
+        X = df.drop(columns=[self.target_col])
+        y = df[self.target_col]
+
+        # f-score
+        if y.dtype == "object" or y.dtype.name == "category":
+            scores, _ = f_classif(X, y)
+        else:
+            scores, _ = f_regression(X, y)
+
+        self._fit_top(X.columns.tolist(), scores, "F-score")
+
+    def _fit_top(self, features: List[str], scores, method_name: str) -> None:
+        """Determine top-k or percentile features to keep."""
+        importance = pd.DataFrame({"feature": features, "score": scores}).sort_values("score", ascending=False)
+
+        if self.k:
+            keep = importance.head(self.k)["feature"].tolist()
+        elif self.percentile:
+            n_keep = int(len(features) * self.percentile / 100)
+            keep = importance.head(n_keep)["feature"].tolist()
+        else:
+            n_keep = max(1, len(features) // 2)
+            keep = importance.head(n_keep)["feature"].tolist()
+
+        drop = [f for f in features if f not in keep]
+        self.features_to_drop = drop
+        self.selected_features = keep
+        print(f"[{method_name}] Keeping {len(keep)} features, Dropping {len(drop)} features")
+        print(f"Top features: {keep[:5]}")
+
+    # ---------------- Legacy Methods (for backward compatibility) ---------------- #
 
     def _select_correlation(self, df: pd.DataFrame) -> pd.DataFrame:
         numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()

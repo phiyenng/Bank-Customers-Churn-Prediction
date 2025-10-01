@@ -23,6 +23,7 @@ from .xgboost import XGBoostModel
 from .lightgbm import LightGBMModel
 from .catboost import CatBoostModel
 from .evaluation import get_evaluation_metrics
+from ..modules.imbalance_handler import ImbalanceHandler
 
 
 def _load_yaml(path: Path) -> Dict:
@@ -42,9 +43,9 @@ def _load_fold_data(fold_dir: Path, target_col: str) -> Tuple[pd.DataFrame, pd.S
     return X_train, y_train, X_val, y_val
 
 
-def _evaluate_on_fold(model_id: str, model_obj, X_train, y_train, X_val, y_val) -> Dict[str, float]:
+def _evaluate_on_fold(model_id: str, model_obj, X_train, y_train, X_val, y_val, sample_weight=None) -> Dict[str, float]:
     """Fit model and compute evaluation metrics dictionary for one fold."""
-    model_obj.fit(X_train, y_train)
+    model_obj.fit(X_train, y_train, sample_weight=sample_weight)
     y_pred = model_obj.predict(X_val)
     y_proba = model_obj.predict_proba(X_val)[:, 1]
     return get_evaluation_metrics(y_val, y_pred, y_proba, model_id=model_id)
@@ -58,6 +59,11 @@ def run_cv_training(artifacts_dir: Path = Path("saved_models"), target_col: str 
     fold_dirs = sorted([p for p in cv_dir.glob("fold_*") if p.is_dir()])
     if not fold_dirs:
         raise FileNotFoundError(f"No folds found under {cv_dir}. Run the pipeline to generate CV folds first.")
+
+    # Load main config to check imbalance handling method
+    main_config = _load_yaml(Path("config.yaml"))
+    imbalance_cfg = main_config.get("imbalance", {})
+    use_class_weight = imbalance_cfg.get("enable", False) and imbalance_cfg.get("method") == "class_weight"
 
     # Load optional per-model configs
     configs_root = Path("configs")
@@ -77,9 +83,16 @@ def run_cv_training(artifacts_dir: Path = Path("saved_models"), target_col: str 
     for fold_dir in fold_dirs:
         X_train, y_train, X_val, y_val = _load_fold_data(fold_dir, target_col)
 
+        # Compute sample weights if using class_weight method
+        sample_weight = None
+        if use_class_weight:
+            imbalance_handler = ImbalanceHandler(method='class_weight')
+            class_weights_dict = imbalance_handler.get_class_weights(y_train, method='balanced')
+            sample_weight = np.array([class_weights_dict[label] for label in y_train])
+
         for model_id, cls, params in model_specs:
             model = cls(params=params)
-            metrics = _evaluate_on_fold(model_id, model, X_train, y_train, X_val, y_val)
+            metrics = _evaluate_on_fold(model_id, model, X_train, y_train, X_val, y_val, sample_weight=sample_weight)
             metrics["Fold"] = fold_dir.name
             all_results.append(metrics)
 

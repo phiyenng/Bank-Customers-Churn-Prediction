@@ -13,7 +13,7 @@ feature_engineering:
 
 feature_selection:
   enable: true
-  method: 'mutual_info'   # 'correlation' | 'variance' | 'mutual_info' | 'f_score'
+  method: 'correlation'   # 'correlation' | 'variance' | 'mutual_info' | 'f_score'
   threshold: 0.95       
   target_col: 'Exited' 
   k: 20                 
@@ -21,7 +21,7 @@ feature_selection:
 
 imbalance:
   enable: true
-  method: 'class_weight'         # 'smote' | 'adasyn' | 'smote_tomek' | 'smote_enn' | 'class_weight'
+  method: 'smote'         # 'smote' | 'adasyn' | 'smote_tomek' | 'smote_enn' | 'class_weight'
   sampling_strategy: 'auto'
 
 split:
@@ -43,23 +43,58 @@ tuning:
 
   XGBoost:
     param_space:
-      n_estimators: [100, 200, 300]
-      max_depth: [3, 4, 5, 6]
-      learning_rate: [0.03, 0.05, 0.1]
-      subsample: [0.7, 0.8, 1.0]
-      colsample_bytree: [0.7, 0.8, 1.0]
+      n_estimators:
+        type: int
+        low: 100
+        high: 300
+      max_depth:
+        type: int
+        low: 3
+        high: 6
+      learning_rate:
+        type: float
+        low: 0.03
+        high: 0.1
+      subsample:
+        type: float
+        low: 0.7
+        high: 1.0
+      colsample_bytree:
+        type: float
+        low: 0.7
+        high: 1.0
+
+
   LightGBM:
     param_space:
-      n_estimators: [200, 400, 600]
-      num_leaves: [31, 63, 127]
-      learning_rate: [0.03, 0.05, 0.1]
-      subsample: [0.7, 0.8, 1.0]
-      colsample_bytree: [0.7, 0.8, 1.0]
+      n_estimators:
+        type: int
+        values: [200, 400, 600]
+      num_leaves:
+        type: int
+        values: [31, 63, 127]
+      learning_rate:
+        type: float
+        values: [0.03, 0.05, 0.1]
+      subsample:
+        type: float
+        values: [0.7, 0.8, 1.0]
+      colsample_bytree:
+        type: float
+        values: [0.7, 0.8, 1.0]
+
+
   CatBoost:
     param_space:
-      depth: [4, 6, 8]
-      learning_rate: [0.03, 0.05, 0.1]
-      iterations: [300, 500, 800]
+      depth:
+        type: int
+        values: [4, 6, 8]
+      learning_rate:
+        type: float
+        values: [0.03, 0.05, 0.1]
+      iterations:
+        type: int
+        values: [300, 500, 800]
 
 paths:
   combine_sources:
