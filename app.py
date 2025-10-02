@@ -635,7 +635,7 @@ def show_dashboard(df):
             )
         )
 
-        st.altair_chart(chart, width='stretch')
+        st.altair_chart(chart, use_container_width=True)
 
     
     
@@ -657,7 +657,7 @@ def show_dashboard(df):
                     .title("Status"),
             )
             .configure_legend(orient="bottom"),
-            width='stretch'
+            use_container_width=True
         )
     
     # Second row
@@ -675,7 +675,7 @@ def show_dashboard(df):
                 alt.Color("Exited:N").scale(range=['#29B09D', '#7DEFA1']).title("Churn Status"),
             )
             .configure_legend(orient="bottom"),
-            width='stretch'
+            use_container_width=True
         )
     
     with cols[1].container(border=True, height="stretch"):
@@ -712,7 +712,7 @@ def show_dashboard(df):
             )
         )
 
-        st.altair_chart(chart, width='stretch')
+        st.altair_chart(chart, use_container_width=True)
         
     # Third row
     cols = st.columns(2)
@@ -731,7 +731,7 @@ def show_dashboard(df):
                 alt.Tooltip(['EstimatedSalary:Q', 'Balance:Q', 'Geography:N', 'Exited:N'])
             )
             .configure_legend(orient="bottom"),
-            width='stretch'
+            use_container_width=True
         )
     
     with cols[1].container(border=True, height="stretch"):
@@ -754,7 +754,7 @@ def show_dashboard(df):
             )
             .configure_legend(orient="bottom")
             .resolve_scale(color='independent'),
-            width='stretch'
+            use_container_width=True
         )
     
     # Fourth row
@@ -792,7 +792,7 @@ def show_dashboard(df):
             )
         )
 
-        st.altair_chart(heatmap + text, width='stretch')
+        st.altair_chart(heatmap + text, use_container_width=True)
 
 def show_prediction_page(df):
     """Display prediction interface"""
