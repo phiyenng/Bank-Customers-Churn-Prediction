@@ -21,9 +21,6 @@ warnings.filterwarnings('ignore')
 import sys
 sys.path.append('src')
 from modules.processing import DataLoader
-from modules.feature_engineering import FeatureCreation, FeatureTransformation, FeatureSelection
-from modules.imbalance_handler import ImbalanceHandler
-from models.lightgbm import LightGBMModel
 
 # Page configuration
 st.set_page_config(
@@ -40,7 +37,7 @@ st.markdown(
       --bg:#f6f8fb;
       --card:#ffffff;
       --muted:#6b7280;
-      --accent:#346eff;
+      --accent:#4B98FF;
     }
     html, body, [class*="css"] {
       background: linear-gradient(180deg,#f6f8fb 0%,#f3f6fb 100%);
@@ -166,19 +163,56 @@ def load_data():
         return None, None, None
 
 # Load trained model
+# Define available imbalance methods
+IMBALANCE_METHODS = {
+    'SMOTE': 'smote_saved_models',
+    'ADASYN': 'adasyn_saved_models', 
+    'SMOTE + Tomek': 'smote_tomek_saved_models',
+    'SMOTE + ENN': 'smote_enn_saved_models',
+    'Class Weight': 'class_weight_saved_models'
+}
+
 @st.cache_resource
-def load_model():
-    """Load the trained model"""
+def load_model(method_dir="smote_saved_models"):
+    """Load the trained model for specified method"""
     try:
-        model_path = "smote_saved_models/best_model_tuned_optuna.joblib"
+        model_path = f"{method_dir}/best_model_tuned_optuna.joblib"
         if Path(model_path).exists():
             return joblib.load(model_path)
         else:
-            st.error("Model file not found!")
+            st.error(f"Model file not found: {model_path}")
             return None
     except Exception as e:
         st.error(f"Error loading model: {str(e)}")
         return None
+
+@st.cache_data
+def load_all_metrics():
+    """Load metrics for all imbalance methods"""
+    all_metrics = {}
+    
+    for method_name, method_dir in IMBALANCE_METHODS.items():
+        try:
+            # Load tuned metrics
+            tuned_path = f"{method_dir}/test_metrics_optuna.csv"
+            baseline_path = f"{method_dir}/test_metrics_baseline.csv"
+            
+            if Path(tuned_path).exists():
+                tuned_df = pd.read_csv(tuned_path)
+                all_metrics[method_name] = {
+                    'tuned': tuned_df.iloc[0].to_dict() if len(tuned_df) > 0 else None
+                }
+            
+            if Path(baseline_path).exists():
+                baseline_df = pd.read_csv(baseline_path)
+                if method_name not in all_metrics:
+                    all_metrics[method_name] = {}
+                all_metrics[method_name]['baseline'] = baseline_df.iloc[0].to_dict() if len(baseline_df) > 0 else None
+                
+        except Exception as e:
+            st.warning(f"Could not load metrics for {method_name}: {str(e)}")
+            
+    return all_metrics
 
 # Load test metrics
 @st.cache_data
@@ -215,8 +249,6 @@ def main():
         st.session_state.current_page = "Prediction"
     
     # Project Information at bottom of sidebar
-    st.sidebar.markdown("<br><br>", unsafe_allow_html=True) 
-    st.sidebar.markdown("<br><br>", unsafe_allow_html=True) 
     st.sidebar.markdown("<br><br>", unsafe_allow_html=True)
     st.sidebar.markdown("---")
     st.sidebar.markdown("""
@@ -234,19 +266,19 @@ def main():
     
     page = st.session_state.current_page
     
-    # Load data and model
+    # Load data and metrics
     original_df, test_df, combined_df = load_data()
-    model = load_model()
     baseline_metrics, tuned_metrics, cv_metrics = load_metrics()
+    all_metrics = load_all_metrics()
     
     if page == "Project Information":
-        show_project_info(combined_df, baseline_metrics, tuned_metrics, cv_metrics)
+        show_project_info(combined_df, baseline_metrics, tuned_metrics, cv_metrics, all_metrics)
     elif page == "Dashboard":
         show_dashboard(combined_df)
     elif page == "Prediction":
-        show_prediction_page(model, combined_df)
+        show_prediction_page(combined_df)
 
-def show_project_info(df, baseline_metrics, tuned_metrics, cv_metrics):
+def show_project_info(df, baseline_metrics, tuned_metrics, cv_metrics, all_metrics):
     """Display project information page"""
     st.markdown('<h1 class="main-header">Bank Customer Churn Prediction</h1>', unsafe_allow_html=True)
     
@@ -278,6 +310,37 @@ def show_project_info(df, baseline_metrics, tuned_metrics, cv_metrics):
             st.metric("Features", f"{len(df.columns)-1}")
             churn_rate = df['Exited'].mean() * 100
             st.metric("Churn Rate", f"{churn_rate:.1f}%")
+    
+    st.markdown("---")
+    
+    # Proposed Framework
+    st.markdown("### Proposed Framework")
+    
+    st.markdown("""
+    This research proposes a comprehensive framework for bank customer churn prediction that integrates 
+    multiple imbalance handling techniques with gradient boosting algorithms. The framework consists of 
+    several key components working together to achieve optimal prediction performance.
+    """)
+    
+    # Display framework image
+    try:
+        st.image("framework.png", 
+                caption="Proposed Framework for Bank Customer Churn Prediction", 
+                use_container_width =True)
+    except Exception as e:
+        st.warning("Framework image not found. Please ensure 'framework.png' is in the project directory.")
+    
+    st.markdown("""
+    **Framework Components:**
+    
+    1. **Data Preprocessing**: Outlier removal, duplicate handling, and encoding
+    2. **Feature Engineering**: Feature creation and selection for optimal model input
+    3. **Class Imbalance Handling**: Multiple techniques (SMOTE, ADASYN, Hybrid methods, Class weighting)
+    4. **Model Training**: Gradient boosting algorithms (XGBoost, LightGBM, CatBoost)
+    5. **Cross-Validation**: Stratified K-fold for robust evaluation
+    6. **Hyperparameter Tuning**: Optuna-based optimization
+    7. **Model Evaluation**: Comprehensive metrics and interpretability analysis
+    """)
     
     st.markdown("---")
     
@@ -368,6 +431,77 @@ def show_project_info(df, baseline_metrics, tuned_metrics, cv_metrics):
         with col2:
             st.markdown("**Data Types:**")
             st.dataframe(df.dtypes.to_frame('Data Type'), use_container_width=True)
+    
+    # Methods Comparison Table
+    st.markdown("---")
+    st.markdown("### Imbalance Methods Performance Comparison")
+    
+    if all_metrics:
+        # Create comparison dataframe
+        comparison_data = []
+        
+        for method_name, metrics in all_metrics.items():
+            if 'tuned' in metrics and metrics['tuned']:
+                tuned_data = metrics['tuned']
+                # Extract model name from the Model column
+                model_name = tuned_data.get('Model', 'Unknown')
+                # Clean up model name for display
+                if '_tuned_optuna' in model_name:
+                    clean_model_name = model_name.replace('_tuned_optuna', '')
+                elif '_baseline' in model_name:
+                    clean_model_name = model_name.replace('_baseline', '')
+                else:
+                    clean_model_name = model_name
+                
+                comparison_data.append({
+                    'Method': method_name,
+                    'Model': clean_model_name,
+                    'Accuracy': f"{tuned_data.get('Accuracy', 0):.4f}",
+                    'F1 Score': f"{tuned_data.get('F1', 0):.4f}",
+                    'Precision': f"{tuned_data.get('Precision', 0):.4f}",
+                    'Recall': f"{tuned_data.get('Recall', 0):.4f}",
+                    'ROC AUC': f"{tuned_data.get('ROC_AUC', 0):.4f}",
+                    'PR AUC': f"{tuned_data.get('PR_AUC', 0):.4f}"
+                })
+        
+        if comparison_data:
+            comparison_df = pd.DataFrame(comparison_data)
+            
+            # Find best method for each metric
+            numeric_df = comparison_df.copy()
+            for col in ['Accuracy', 'F1 Score', 'Precision', 'Recall', 'ROC AUC', 'PR AUC']:
+                numeric_df[col] = pd.to_numeric(numeric_df[col])
+            
+            # Style the dataframe to highlight best values
+            def highlight_best(s):
+                if s.name in ['Accuracy', 'F1 Score', 'Precision', 'Recall', 'ROC AUC', 'PR AUC']:
+                    max_val = s.max()
+                    return ['background-color: #e8f5e8; font-weight: bold' if v == max_val else '' for v in s]
+                return ['' for _ in s]
+            
+            styled_df = comparison_df.style.apply(highlight_best, axis=0)
+            
+            st.dataframe(styled_df, use_container_width=True, hide_index=True)
+            
+            # Best method summary
+            best_roc_idx = numeric_df['ROC AUC'].idxmax()
+            best_roc_method = numeric_df.loc[best_roc_idx, 'Method']
+            best_roc_model = comparison_df.loc[best_roc_idx, 'Model']
+            best_roc_score = numeric_df['ROC AUC'].max()
+            
+            st.markdown(f"""
+            **🏆 Best Performing Method:** {best_roc_method} with {best_roc_model} (ROC AUC: {best_roc_score:.4f})
+            
+            **Key Insights:**
+            - All methods show competitive performance
+            - ROC AUC is the primary metric for imbalanced classification
+            - Different methods may excel in different scenarios
+            - Model: {best_roc_model} consistently performs well across methods
+            """)
+        else:
+            st.warning("No tuned metrics found for comparison")
+    else:
+        st.warning("Could not load metrics for comparison")
 
 def show_dashboard(df):
     """Display interactive dashboard"""
@@ -660,12 +794,41 @@ def show_dashboard(df):
 
         st.altair_chart(heatmap + text, use_container_width=True)
 
-def show_prediction_page(model, df):
+def show_prediction_page(df):
     """Display prediction interface"""
     st.markdown('<h1 class="main-header">Customer Churn Prediction</h1>', unsafe_allow_html=True)
     
+    # Method selection
+    st.markdown("### 🎯 Select Imbalance Handling Method")
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        selected_method = st.selectbox(
+            "Choose the imbalance method for prediction:",
+            options=list(IMBALANCE_METHODS.keys()),
+            index=0,
+            help="Different methods may give slightly different predictions based on how they handle class imbalance during training."
+        )
+    
+    with col2:
+        st.markdown(f"""
+        **Selected Method:** {selected_method}
+        
+        **Method Info:**
+        - SMOTE: Synthetic Minority Oversampling
+        - ADASYN: Adaptive Synthetic Sampling  
+        - SMOTE + Tomek: Hybrid approach
+        - SMOTE + ENN: Edited Nearest Neighbours
+        - Class Weight: Weighted training
+        """)
+    
+    # Load selected model
+    method_dir = IMBALANCE_METHODS[selected_method]
+    model = load_model(method_dir)
+    
     if model is None:
-        st.error("Model not available. Please check if the model file exists.")
+        st.error(f"Model not available for {selected_method}. Please check if the model file exists.")
         return
     
     st.markdown("""
@@ -727,9 +890,9 @@ def show_prediction_page(model, df):
             
             # Display results
             st.markdown("---")
-            st.markdown("### Prediction Results")
+            st.markdown(f"### 🎯 Prediction Results - {selected_method}")
             
-            col1, col2, col3 = st.columns(3)
+            col1, col2, col3, col4 = st.columns(4)
             
             with col1:
                 churn_prob = probability[1] * 100
@@ -742,6 +905,9 @@ def show_prediction_page(model, df):
             with col3:
                 prediction_text = "HIGH RISK" if prediction == 1 else "LOW RISK"
                 st.metric("Risk Level", prediction_text)
+            
+            with col4:
+                st.metric("Method Used", selected_method)
             
             # Risk assessment
             if churn_prob > 70:
