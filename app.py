@@ -236,15 +236,15 @@ def main():
     if 'current_page' not in st.session_state:
         st.session_state.current_page = "Project Information"
     
-    if st.sidebar.button("Project Information", use_container_width=True, 
+    if st.sidebar.button("Project Information", width='stretch', 
                         type="primary" if st.session_state.current_page == "Project Information" else "secondary"):
         st.session_state.current_page = "Project Information"
     
-    if st.sidebar.button("Dashboard", use_container_width=True,
+    if st.sidebar.button("Dashboard", width='stretch',
                         type="primary" if st.session_state.current_page == "Dashboard" else "secondary"):
         st.session_state.current_page = "Dashboard"
     
-    if st.sidebar.button("Prediction", use_container_width=True,
+    if st.sidebar.button("Prediction", width='stretch',
                         type="primary" if st.session_state.current_page == "Prediction" else "secondary"):
         st.session_state.current_page = "Prediction"
     
@@ -426,11 +426,11 @@ def show_project_info(df, baseline_metrics, tuned_metrics, cv_metrics, all_metri
         
         with col1:
             st.markdown("**Dataset Statistics:**")
-            st.dataframe(df.describe(), use_container_width=True)
+            st.dataframe(df.describe(), width='stretch')
         
         with col2:
             st.markdown("**Data Types:**")
-            st.dataframe(df.dtypes.to_frame('Data Type'), use_container_width=True)
+            st.dataframe(df.dtypes.to_frame('Data Type'), width='stretch')
     
     # Methods Comparison Table
     st.markdown("---")
@@ -481,7 +481,7 @@ def show_project_info(df, baseline_metrics, tuned_metrics, cv_metrics, all_metri
             
             styled_df = comparison_df.style.apply(highlight_best, axis=0)
             
-            st.dataframe(styled_df, use_container_width=True, hide_index=True)
+            st.dataframe(styled_df, width='stretch', hide_index=True)
             
             # Best method summary
             best_roc_idx = numeric_df['ROC AUC'].idxmax()
@@ -635,7 +635,7 @@ def show_dashboard(df):
             )
         )
 
-        st.altair_chart(chart, use_container_width=True)
+        st.altair_chart(chart, width='stretch')
 
     
     
@@ -657,7 +657,7 @@ def show_dashboard(df):
                     .title("Status"),
             )
             .configure_legend(orient="bottom"),
-            use_container_width=True
+            width='stretch'
         )
     
     # Second row
@@ -675,7 +675,7 @@ def show_dashboard(df):
                 alt.Color("Exited:N").scale(range=['#29B09D', '#7DEFA1']).title("Churn Status"),
             )
             .configure_legend(orient="bottom"),
-            use_container_width=True
+            width='stretch'
         )
     
     with cols[1].container(border=True, height="stretch"):
@@ -712,7 +712,7 @@ def show_dashboard(df):
             )
         )
 
-        st.altair_chart(chart, use_container_width=True)
+        st.altair_chart(chart, width='stretch')
         
     # Third row
     cols = st.columns(2)
@@ -731,7 +731,7 @@ def show_dashboard(df):
                 alt.Tooltip(['EstimatedSalary:Q', 'Balance:Q', 'Geography:N', 'Exited:N'])
             )
             .configure_legend(orient="bottom"),
-            use_container_width=True
+            width='stretch'
         )
     
     with cols[1].container(border=True, height="stretch"):
@@ -754,7 +754,7 @@ def show_dashboard(df):
             )
             .configure_legend(orient="bottom")
             .resolve_scale(color='independent'),
-            use_container_width=True
+            width='stretch'
         )
     
     # Fourth row
@@ -792,7 +792,7 @@ def show_dashboard(df):
             )
         )
 
-        st.altair_chart(heatmap + text, use_container_width=True)
+        st.altair_chart(heatmap + text, width='stretch')
 
 def show_prediction_page(df):
     """Display prediction interface"""
@@ -860,7 +860,7 @@ def show_prediction_page(df):
             is_active_member = st.selectbox("Is Active Member", ["Yes", "No"], help="Whether customer is active")
         
         # Submit button
-        submitted = st.form_submit_button("Predict Churn Probability", use_container_width=True)
+        submitted = st.form_submit_button("Predict Churn Probability", width='stretch')
     
     if submitted:
         # Prepare input data
