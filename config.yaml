@@ -20,7 +20,7 @@ feature_selection:
 
 imbalance:
   enable: true
-  method: 'smote'         # 'smote' | 'adasyn' | 'smote_tomek' | 'smote_enn' | 'class_weight'
+  method: 'smote_enn'         # 'smote' | 'adasyn' | 'smote_tomek' | 'smote_enn' | 'class_weight'
   sampling_strategy: 'auto'
 
 split:
